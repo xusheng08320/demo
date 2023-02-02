@@ -1,6 +1,7 @@
 package com.xusheng.flink;
 
 import java.io.Serializable;
+import java.sql.Timestamp;
 
 /**
  * @Author xusheng
@@ -11,12 +12,7 @@ public class Transaction implements Serializable {
     public Long txId;
     public Long accountId;
     public Double amount;
-
-    public Transaction(Long txId, Long accountId, Double amount) {
-        this.txId = txId;
-        this.accountId = accountId;
-        this.amount = amount;
-    }
+    private Long datetime;
 
     @Override
     public String toString() {
@@ -24,7 +20,18 @@ public class Transaction implements Serializable {
                 "txId=" + txId +
                 ", accountId=" + accountId +
                 ", amount=" + amount +
+                ", datetime=" + new Timestamp(datetime) +
                 '}';
+    }
+
+    public Transaction() {
+    }
+
+    public Transaction(Long txId, Long accountId, Double amount, Long datetime) {
+        this.txId = txId;
+        this.accountId = accountId;
+        this.amount = amount;
+        this.datetime = datetime;
     }
 
     public Long getTxId() {
@@ -49,5 +56,13 @@ public class Transaction implements Serializable {
 
     public void setAmount(Double amount) {
         this.amount = amount;
+    }
+
+    public Long getDatetime() {
+        return datetime;
+    }
+
+    public void setDatetime(Long datetime) {
+        this.datetime = datetime;
     }
 }
