@@ -16,11 +16,13 @@ public class UrlVisitDataSource implements SourceFunction<URLVisit> {
         URLVisit visit3 = new URLVisit("/cart", 123L, 1800L);
         URLVisit visit4 = new URLVisit("/index", 123L, 2000L);
         URLVisit visit5 = new URLVisit("/cart", 123L, 2100L);
+        URLVisit visit6 = new URLVisit("/ttt", 123L, 2500L);
         sourceContext.collect(visit1);
         sourceContext.collect(visit2);
         sourceContext.collect(visit3);
         sourceContext.collect(visit4);
         sourceContext.collect(visit5);
+        sourceContext.collect(visit6);
     }
 
     @Override
