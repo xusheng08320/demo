@@ -7,16 +7,19 @@ import com.xusheng.flink.dto.UrlVisitCount;
 import com.xusheng.flink.processor.*;
 import com.xusheng.flink.sink.AlertSink;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
+import org.apache.flink.api.common.functions.CoGroupFunction;
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.api.java.tuple.Tuple3;
 import org.apache.flink.api.java.tuple.Tuple4;
 import org.apache.flink.api.java.typeutils.TupleTypeInfo;
+import org.apache.flink.shaded.zookeeper3.org.apache.zookeeper.server.quorum.Leader;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.ProcessFunction;
 import org.apache.flink.streaming.api.functions.co.CoMapFunction;
+import org.apache.flink.streaming.api.functions.co.ProcessJoinFunction;
 import org.apache.flink.streaming.api.windowing.assigners.SlidingEventTimeWindows;
 import org.apache.flink.streaming.api.windowing.assigners.TumblingEventTimeWindows;
 import org.apache.flink.streaming.api.windowing.time.Time;
@@ -186,5 +189,93 @@ public class FlinkTest {
                 .process(new OrderCheckProcessor())
                 .print();
         env.execute();
+    }
+
+    @Test
+    public void testWindowJoin() throws Exception {
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+
+        SingleOutputStreamOperator<Tuple2<String, Long>> stream1 = env.fromElements(
+                Tuple2.of("a", 1000L),
+                Tuple2.of("b", 2000L),
+                Tuple2.of("c", 3000L),
+                Tuple2.of("d", 4000L)
+        ).assignTimestampsAndWatermarks(WatermarkStrategy.<Tuple2<String, Long>>forMonotonousTimestamps().withTimestampAssigner((ele, time) -> ele.f1));
+
+        SingleOutputStreamOperator<Tuple2<String, Long>> stream2 = env.fromElements(
+                Tuple2.of("a", 2000L),
+                Tuple2.of("b", 3000L),
+                Tuple2.of("c", 4000L),
+                Tuple2.of("d", 5000L)
+        ).assignTimestampsAndWatermarks(WatermarkStrategy.<Tuple2<String, Long>>forMonotonousTimestamps().withTimestampAssigner((ele, time) -> ele.f1));
+
+        stream1.join(stream2)
+                .where(e1 -> e1.f0)
+                .equalTo(e2 -> e2.f0)
+                .window(TumblingEventTimeWindows.of(Time.seconds(6)))
+                .apply((left, right) -> left + "=>" + right)
+                .print();
+        env.execute();
+    }
+
+    @Test
+    public void testIntervalWindow() throws Exception {
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        SingleOutputStreamOperator<Tuple3<String, String, Long>> stream1 = env.fromElements(
+                Tuple3.of("Mary", "order-1", 1000L),
+                Tuple3.of("Alice", "order-2", 2000L),
+                Tuple3.of("Bob", "order-3", 3000L),
+                Tuple3.of("Alice", "order-4", 4000L),
+                Tuple3.of("Cary", "order-5", 5000L)
+        ).assignTimestampsAndWatermarks(WatermarkStrategy.<Tuple3<String, String, Long>>forMonotonousTimestamps().withTimestampAssigner((e, time) -> e.f2));
+
+        SingleOutputStreamOperator<Tuple3<String, String, Long>> stream2 = env.fromElements(
+                Tuple3.of("Mary", "/index", 1000L),
+                Tuple3.of("Alice", "/index", 2000L),
+                Tuple3.of("Bob", "/cart", 3000L),
+                Tuple3.of("Alice", "/test", 4000L),
+                Tuple3.of("Cary", "/cart", 5000L)
+        ).assignTimestampsAndWatermarks(WatermarkStrategy.<Tuple3<String, String, Long>>forMonotonousTimestamps().withTimestampAssigner((e, time) -> e.f2));
+
+        stream1.keyBy(data -> data.f0)
+                .intervalJoin(stream2.keyBy(e2 -> e2.f0))
+                .between(Time.seconds(-5), Time.seconds(10))
+                .process(new ProcessJoinFunction<Tuple3<String, String, Long>, Tuple3<String, String, Long>, String>() {
+                    @Override
+                    public void processElement(Tuple3<String, String, Long> left, Tuple3<String, String, Long> right, ProcessJoinFunction<Tuple3<String, String, Long>, Tuple3<String, String, Long>, String>.Context context, Collector<String> collector) throws Exception {
+                        collector.collect(left + "=>" + right);
+                    }
+                })
+                .print();
+        env.execute();
+    }
+
+    @Test
+    public void testCoGroup() throws Exception {
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+
+        SingleOutputStreamOperator<Tuple2<String, Long>> stream1 = env.fromElements(
+                Tuple2.of("a", 1000L),
+                Tuple2.of("b", 2000L),
+                Tuple2.of("a", 3000L),
+                Tuple2.of("b", 4000L)
+        ).assignTimestampsAndWatermarks(WatermarkStrategy.<Tuple2<String, Long>>forMonotonousTimestamps().withTimestampAssigner((ele, time) -> ele.f1));
+
+        SingleOutputStreamOperator<Tuple2<String, Long>> stream2 = env.fromElements(
+                Tuple2.of("a", 2000L),
+                Tuple2.of("b", 3000L),
+                Tuple2.of("a", 4000L),
+                Tuple2.of("b", 5000L)
+        ).assignTimestampsAndWatermarks(WatermarkStrategy.<Tuple2<String, Long>>forMonotonousTimestamps().withTimestampAssigner((ele, time) -> ele.f1));
+
+        stream1.coGroup(stream2)
+                .where(e1 -> e1.f0)
+                .equalTo(e2 -> e2.f0)
+                .window(TumblingEventTimeWindows.of(Time.seconds(5)))
+                .apply((CoGroupFunction<Tuple2<String, Long>, Tuple2<String, Long>, String>) (e1, e2, collector) -> collector.collect(e1 + "=>" + e2))
+                .print();
+
+        env.execute();
+
     }
 }
