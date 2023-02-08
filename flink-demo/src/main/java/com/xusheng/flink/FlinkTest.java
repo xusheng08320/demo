@@ -12,9 +12,15 @@ import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.api.java.tuple.Tuple3;
 import org.apache.flink.api.java.tuple.Tuple4;
 import org.apache.flink.api.java.typeutils.TupleTypeInfo;
+import org.apache.flink.cep.CEP;
+import org.apache.flink.cep.PatternSelectFunction;
+import org.apache.flink.cep.PatternStream;
+import org.apache.flink.cep.pattern.Pattern;
+import org.apache.flink.cep.pattern.conditions.SimpleCondition;
 import org.apache.flink.shaded.zookeeper3.org.apache.zookeeper.server.quorum.Leader;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
+import org.apache.flink.streaming.api.datastream.KeyedStream;
 import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.ProcessFunction;
@@ -28,6 +34,9 @@ import org.apache.flink.util.OutputTag;
 import org.junit.Test;
 
 import java.sql.Timestamp;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 /**
  * @Author xusheng
@@ -277,5 +286,70 @@ public class FlinkTest {
 
         env.execute();
 
+    }
+
+    @Test
+    public void testPeriodPrint() throws Exception {
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+
+        KeyedStream<Tuple2<String, Long>, String> stream1 = env.fromElements(
+                        Tuple2.of("a", System.currentTimeMillis()),
+                        Tuple2.of("b", System.currentTimeMillis()),
+                        Tuple2.of("c", System.currentTimeMillis()),
+                        Tuple2.of("a", System.currentTimeMillis()),
+                        Tuple2.of("b", System.currentTimeMillis())
+                ).assignTimestampsAndWatermarks(WatermarkStrategy.<Tuple2<String, Long>>forMonotonousTimestamps().withTimestampAssigner((e, time) -> e.f1))
+                .keyBy(e -> e.f0);
+        stream1.print("print ");
+
+        stream1.keyBy(e -> e.f0).process(new PeriodPVResult())
+                .print();
+
+        env.execute();
+    }
+
+    @Test
+    public void testCEP() throws Exception {
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        KeyedStream<Tuple3<String, Boolean, Long>, String> stream = env.fromElements(
+                        Tuple3.of("a", false, 1000L),
+                        Tuple3.of("a", false, 2000L),
+                        Tuple3.of("a", false, 3000L),
+                        Tuple3.of("b", true, 4000L),
+                        Tuple3.of("b", true, 5000L)
+                ).assignTimestampsAndWatermarks(WatermarkStrategy.<Tuple3<String, Boolean, Long>>forMonotonousTimestamps().withTimestampAssigner((e, time) -> e.f2))
+                .keyBy(e -> e.f0);
+
+        Pattern<Tuple3<String, Boolean, Long>, Tuple3<String, Boolean, Long>> pattern = Pattern
+                .<Tuple3<String, Boolean, Long>>begin("first")
+                .where(new SimpleCondition<Tuple3<String, Boolean, Long>>() {
+                    @Override
+                    public boolean filter(Tuple3<String, Boolean, Long> e) throws Exception {
+                        return !e.f1;
+                    }
+                })
+                .next("second")
+                .where(new SimpleCondition<Tuple3<String, Boolean, Long>>() {
+                    @Override
+                    public boolean filter(Tuple3<String, Boolean, Long> e) throws Exception {
+                        return !e.f1;
+                    }
+                })
+                .next("third")
+                .where(new SimpleCondition<Tuple3<String, Boolean, Long>>() {
+                    @Override
+                    public boolean filter(Tuple3<String, Boolean, Long> e) throws Exception {
+                        return !e.f1;
+                    }
+                });
+        PatternStream<Tuple3<String, Boolean, Long>> patternStream = CEP.pattern(stream, pattern);
+        patternStream.select((PatternSelectFunction<Tuple3<String, Boolean, Long>, String>) map -> {
+                    Tuple3<String, Boolean, Long> first = map.get("first").get(0);
+                    Tuple3<String, Boolean, Long> second = map.get("second").get(0);
+                    Tuple3<String, Boolean, Long> third = map.get("third").get(0);
+                    return first.f0 + " 连续3次登录失败 " + first.f2 + ", " + second.f2 + ", " + third.f2;
+                })
+                .print("warning:");
+        env.execute();
     }
 }
